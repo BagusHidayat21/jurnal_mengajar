@@ -47,17 +47,11 @@ class JurnalMengajarAdminController extends GetxController {
     try {
       final dateStr = DateFormat('yyyy-MM-dd').format(date);
 
-      // Mengambil data jurnal dengan join presensi_siswa secara mendalam
+      // Mengambil data jurnal dengan presensi_json
       final response = await supabase
           .from('jurnal_harian')
           .select('''
             *,
-            presensi_siswa (
-              *,
-              master_siswa (
-                nama_siswa
-              )
-            ),
             jadwal:jadwal_mengajar!inner (
               *,
               profiles:guru_id (nama_lengkap, foto_url),
@@ -124,18 +118,30 @@ class JurnalMengajarAdminController extends GetxController {
     isLoading.value = true;
     try {
       final userId = supabase.auth.currentUser?.id;
+      final now = DateTime.now().toIso8601String();
 
       await supabase
           .from('jurnal_harian')
           .update({
             'status': status,
             'validated_by': userId,
-            'validated_at': DateTime.now().toIso8601String(),
+            'validated_at': now,
             'catatan_admin': catatanAdmin,
           })
           .eq('id', id);
 
-      await fetchDataByDate(selectedDate.value);
+      // Update local state in-place — avoids full network re-fetch
+      final idx = journals.indexWhere((j) => j['id'] == id);
+      if (idx != -1) {
+        final updated = Map<String, dynamic>.from(journals[idx]);
+        updated['status'] = status;
+        updated['catatan_admin'] = catatanAdmin;
+        updated['validated_by'] = userId;
+        updated['validated_at'] = now;
+        journals[idx] = updated;
+        journals.refresh();
+      }
+
       Get.snackbar('Berhasil', 'Status jurnal diperbarui menjadi $status');
     } catch (e) {
       Get.snackbar('Gagal', 'Gagal memperbarui jurnal: $e');
@@ -353,7 +359,7 @@ class JurnalMengajarAdminPage extends StatelessWidget {
             const SizedBox(height: 2),
             Builder(
               builder: (context) {
-                final List presensi = j['presensi_siswa'] as List? ?? [];
+                final List presensi = j['presensi_json'] as List? ?? [];
                 int sCount = presensi
                     .where(
                       (p) =>
@@ -410,7 +416,7 @@ class JurnalMengajarAdminPage extends StatelessWidget {
   ) {
     final schedule = j['jadwal'] ?? {};
     final guru = schedule['profiles'] ?? {};
-    final List presensi = j['presensi_siswa'] as List? ?? [];
+    final List presensi = j['presensi_json'] as List? ?? [];
 
     // Parse foto lampiran
     final String photoStr = j['foto_lampiran_url']?.toString() ?? "";
@@ -580,7 +586,7 @@ class JurnalMengajarAdminPage extends StatelessWidget {
                                   : Colors.red),
                       ),
                       title: Text(
-                        p['master_siswa']?['nama_siswa'] ??
+                        p['nama_siswa'] ??
                             'Siswa Tidak Dikenal',
                         style: const TextStyle(fontSize: 14),
                       ),

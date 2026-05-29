@@ -31,7 +31,7 @@ class JurnalMengajarGuruController extends GetxController {
       
       final journalRes = await supabase
           .from('jurnal_harian')
-          .select('*, presensi_siswa(*), jadwal_mengajar!inner(*, master_kelas(nama_kelas), master_mata_pelajaran(nama_mata_pelajaran), master_jam(*)), profiles:validated_by(nama_lengkap)')
+          .select('*, jadwal_mengajar!inner(*, master_kelas(nama_kelas), master_mata_pelajaran(nama_mata_pelajaran), master_jam(*)), profiles:validated_by(nama_lengkap)')
           .eq('jadwal_mengajar.guru_id', user.id)
           .eq('tanggal', dateStr);
 
@@ -103,7 +103,7 @@ class JurnalMengajarGuruPage extends StatelessWidget {
                         String status = jurnal['status'] ?? 'pending';
                         
                         // Parse attendance counts
-                        final List presensi = jurnal['presensi_siswa'] as List? ?? [];
+                        final List presensi = jurnal['presensi_json'] as List? ?? [];
                         int sCount = presensi.where((p) => p['status'].toString().toUpperCase().startsWith('S')).length;
                         int iCount = presensi.where((p) => p['status'].toString().toUpperCase().startsWith('I')).length;
                         int aCount = presensi.where((p) => p['status'].toString().toUpperCase().startsWith('A')).length;

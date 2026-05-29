@@ -29,10 +29,6 @@ class DetailJurnalGuruController extends GetxController {
           .from('jurnal_harian')
           .select('''
             *,
-            presensi_siswa (
-              *,
-              master_siswa (*)
-            ),
             jadwal_mengajar (
               *,
               master_kelas (*),
@@ -102,7 +98,7 @@ class DetailJurnalMengajarGuruPage extends StatelessWidget {
         bool isRejected = (status == 'rejected' || status == 'ditolak');
 
         // Parse presensi
-        final List presensi = data['presensi_siswa'] as List? ?? [];
+        final List presensi = data['presensi_json'] as List? ?? [];
         int sakitCount = presensi.where((p) => p['status'].toString().toUpperCase().startsWith('S')).length;
         int izinCount = presensi.where((p) => p['status'].toString().toUpperCase().startsWith('I')).length;
         int alphaCount = presensi.where((p) => p['status'].toString().toUpperCase().startsWith('A')).length;
@@ -237,8 +233,7 @@ class DetailJurnalMengajarGuruPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 ...presensi.map((p) {
-                   final s = p['master_siswa'] ?? {};
-                   final String sName = s['nama_siswa'] ?? 'Siswa Tidak Ditemukan';
+                   final String sName = p['nama_siswa'] ?? 'Siswa Tidak Ditemukan';
                    final String sStatus = p['status'].toString();
                    Color sColor = sStatus.startsWith('S') ? Colors.orange : (sStatus.startsWith('I') ? Colors.blue : Colors.red);
                    
