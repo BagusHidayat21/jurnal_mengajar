@@ -56,9 +56,11 @@ class FormJurnalGuruController extends GetxController {
   }
 
   Future<void> _initForm() async {
-    await fetchSiswa();
     if (isEdit && jurnalId != null) {
-      await fetchJournalData();
+      // Fetch student list and existing journal data in parallel
+      await Future.wait([fetchSiswa(), fetchJournalData()]);
+    } else {
+      await fetchSiswa();
     }
   }
 
@@ -67,7 +69,7 @@ class FormJurnalGuruController extends GetxController {
     try {
       final res = await supabase
           .from('jurnal_harian')
-          .select()
+          .select('id, materi, catatan, status, catatan_admin, tanggal, foto_lampiran_url, presensi_json')
           .eq('id', jurnalId!)
           .single();
 
@@ -89,11 +91,8 @@ class FormJurnalGuruController extends GetxController {
             .toList();
       }
 
-      // Fetch presensi
-      final presensiRes = await supabase
-          .from('presensi_siswa')
-          .select()
-          .eq('jurnal_id', jurnalId!);
+      // Fetch presensi from JSON column
+      final List presensiRes = res['presensi_json'] as List? ?? [];
 
       for (var p in presensiRes) {
         final siswaId = p['siswa_id'] as int;
@@ -224,14 +223,17 @@ class FormJurnalGuruController extends GetxController {
     try {
       final supabase = Supabase.instance.client;
 
-      // 1. Upload images
+      // 1. Upload images in parallel to reduce upload time
       List<String> uploadedUrls = [...existingImagesUrl];
-      for (var file in selectedImages) {
-        final fileName =
-            'jurnal_${DateTime.now().millisecondsSinceEpoch}_${file.path.split('/').last}';
-        await supabase.storage.from('jurnalimage').upload(fileName, file);
-        final url = supabase.storage.from('jurnalimage').getPublicUrl(fileName);
-        uploadedUrls.add(url);
+      if (selectedImages.isNotEmpty) {
+        final uploadFutures = selectedImages.map((file) async {
+          final fileName =
+              'jurnal_${DateTime.now().millisecondsSinceEpoch}_${file.path.split('/').last}';
+          await supabase.storage.from('jurnalimage').upload(fileName, file);
+          return supabase.storage.from('jurnalimage').getPublicUrl(fileName);
+        });
+        final newUrls = await Future.wait(uploadFutures);
+        uploadedUrls.addAll(newUrls);
       }
       String finalPhotoUrl = uploadedUrls.join(',');
 
@@ -243,9 +245,22 @@ class FormJurnalGuruController extends GetxController {
         allJadwalIds = [schedule['id'] as int];
       }
 
-      // 3. Simpan Jurnal untuk setiap jadwal_id
-      // Gunakan list untuk menampung ID jurnal yang baru dibuat/diupdate
-      List<int> savedJurnalIds = [];
+
+      // 3. Construct presensi JSON list
+      List<Map<String, dynamic>> presensiJsonList = [];
+      absensiMap.forEach((siswaId, status) {
+        if (status != null && status != 'H' && status != 'Hadir') {
+          final s = siswaList.firstWhere(
+            (item) => item['id'] == siswaId,
+            orElse: () => <String, dynamic>{},
+          );
+          presensiJsonList.add({
+            'siswa_id': siswaId,
+            'nama_siswa': s['nama_siswa'] ?? 'Siswa Tidak Ditemukan',
+            'status': status,
+          });
+        }
+      });
 
       final jurnalData = {
         'tanggal': DateFormat('yyyy-MM-dd').format(selectedTanggal.value),
@@ -253,61 +268,26 @@ class FormJurnalGuruController extends GetxController {
         'catatan': catatanController.text,
         'foto_lampiran_url': finalPhotoUrl,
         'status': 'pending',
+        'jadwal_id': allJadwalIds.first,
+        'jadwal_ids': allJadwalIds,
+        'presensi_json': presensiJsonList,
       };
 
       if (isEdit && jurnalId != null) {
-        // Mode Edit (asumsi hanya satu jurnal yang diedit)
-        final res = await supabase
+        // Mode Edit
+        await supabase
             .from('jurnal_harian')
-            .update({...jurnalData, 'jadwal_id': allJadwalIds.first})
+            .update(jurnalData)
             .eq('id', jurnalId!)
             .select()
             .single();
-        savedJurnalIds.add(res['id']);
       } else {
-        // Mode Baru (bisa berkelompok)
-        for (int jId in allJadwalIds) {
-          final res = await supabase
-              .from('jurnal_harian')
-              .insert({...jurnalData, 'jadwal_id': jId})
-              .select()
-              .single();
-          savedJurnalIds.add(res['id']);
-        }
-      }
-
-      // 4. Proses Presensi - HANYA status S, I, A yang disimpan
-      // Siswa yang Hadir (H) tidak perlu disimpan di database untuk menghemat payload dan storage
-      List<Map<String, dynamic>> presensiList = [];
-      final kelasId = schedule['kelas_id'];
-
-      absensiMap.forEach((siswaId, status) {
-        // Normalisasi status dan hanya masukkan jika S, I, atau A
-        if (status != null && status != 'H' && status != 'Hadir') {
-          for (int sJurnalId in savedJurnalIds) {
-            presensiList.add({
-              'jurnal_id': sJurnalId,
-              'siswa_id': siswaId,
-              'status': status,
-              'kelas_id': kelasId,
-            });
-          }
-        }
-      });
-
-      // 5. Bersihkan data presensi lama jika sedang edit
-      if (isEdit) {
-        for (int sJurnalId in savedJurnalIds) {
-          await supabase
-              .from('presensi_siswa')
-              .delete()
-              .eq('jurnal_id', sJurnalId);
-        }
-      }
-
-      // 6. Bulk Insert Presensi (jika ada yang tidak hadir)
-      if (presensiList.isNotEmpty) {
-        await supabase.from('presensi_siswa').insert(presensiList);
+        // Mode Baru
+        await supabase
+            .from('jurnal_harian')
+            .insert(jurnalData)
+            .select()
+            .single();
       }
 
       Get.back(result: true);

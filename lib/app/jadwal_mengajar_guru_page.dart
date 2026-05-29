@@ -29,13 +29,16 @@ class JadwalMengajarGuruController extends GetxController {
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
+      final weekday = date.weekday % 7;
+
       final scheduleRes = await supabase
           .from('jadwal_mengajar')
           .select(
             '*, master_kelas(nama_kelas), master_mata_pelajaran(nama_mata_pelajaran), master_jam(*), jurnal_harian(id)',
           )
           .eq('guru_id', user.id)
-          .eq('tanggal', dateStr)
+          .or('tanggal.eq.$dateStr,and(tanggal.is.null,hari.eq.$weekday)')
+          .eq('jurnal_harian.tanggal', dateStr)
           .eq('is_active', true)
           .order('jam_id', ascending: true);
 
@@ -124,7 +127,7 @@ class JadwalMengajarGuruPage extends StatelessWidget {
 
                           final group = controller.groupedSchedules[index];
                           final firstSchedule = group.first;
-                          bool sudahDiisi = group.every(
+                          bool sudahDiisi = group.any(
                             (s) => (s['jurnal_harian'] as List).isNotEmpty,
                           );
 
@@ -366,7 +369,7 @@ class JadwalMengajarGuruPage extends StatelessWidget {
                             : [schedule],
                         isEdit: sudahDiisi,
                         jurnalId: sudahDiisi
-                            ? schedule['jurnal_harian'][0]['id']
+                            ? (groupedSchedules.firstWhere((s) => (s['jurnal_harian'] as List).isNotEmpty)['jurnal_harian'] as List)[0]['id']
                             : null,
                       ),
                     )?.then((value) {

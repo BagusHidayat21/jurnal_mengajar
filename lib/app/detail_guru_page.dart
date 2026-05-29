@@ -26,16 +26,16 @@ class DetailGuruController extends GetxController {
   Future<void> fetchInitialData() async {
     isLoading.value = true;
     try {
-      // 1. Fetch Profile
-      final profileRes = await supabase
-          .from('profiles')
-          .select()
-          .eq('id', guruId)
-          .single();
-      guruProfile.value = profileRes;
-
-      // 2. Fetch Data for selected date
-      await fetchDataByDate(selectedDate.value);
+      // Fetch profile and schedule data in parallel
+      final results = await Future.wait([
+        supabase
+            .from('profiles')
+            .select('id, nama_lengkap, foto_url, role, nip')
+            .eq('id', guruId)
+            .single(),
+        _fetchSchedulesAndJournals(selectedDate.value),
+      ]);
+      guruProfile.value = results[0] as Map<String, dynamic>;
     } catch (e) {
       Get.snackbar('Error', e.toString());
     } finally {
@@ -43,34 +43,75 @@ class DetailGuruController extends GetxController {
     }
   }
 
-  Future<void> fetchDataByDate(DateTime date) async {
+  Future<void> _fetchSchedulesAndJournals(DateTime date) async {
     selectedDate.value = date;
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
+    final weekday = date.weekday % 7;
 
-    try {
-      // Fetch Schedule including journal status
-      final scheduleRes = await supabase
+    final results = await Future.wait([
+      supabase
           .from('jadwal_mengajar')
           .select(
             '*, master_kelas(nama_kelas), master_mata_pelajaran(nama_mata_pelajaran), master_jam(*), jurnal_harian(id, status)',
           )
           .eq('guru_id', guruId)
-          .eq('tanggal', dateStr)
-          .eq('is_active', true);
-      schedules.value = scheduleRes;
-
-      // Fetch Journals including attendance
-      final journalRes = await supabase
+          .or('tanggal.eq.$dateStr,and(tanggal.is.null,hari.eq.$weekday)')
+          .eq('jurnal_harian.tanggal', dateStr)
+          .eq('is_active', true),
+      supabase
           .from('jurnal_harian')
           .select(
-            '*, presensi_siswa(*), jadwal:jadwal_mengajar!inner(*, master_kelas(*), master_mata_pelajaran(*), master_jam(*))',
+            '*, jadwal:jadwal_mengajar!inner(*, master_kelas(*), master_mata_pelajaran(*), master_jam(*))',
           )
           .eq('jadwal.guru_id', guruId)
-          .eq('tanggal', dateStr);
+          .eq('tanggal', dateStr),
+    ]);
 
-      journals.value = journalRes;
+    final scheduleRes = List<Map<String, dynamic>>.from(results[0]);
+
+    // Group and propagate journal for consecutive schedules
+    List<List<Map<String, dynamic>>> groups = [];
+    for (var s in scheduleRes) {
+      final sMap = Map<String, dynamic>.from(s);
+      if (groups.isNotEmpty) {
+        final lastGroup = groups.last;
+        final lastItem = lastGroup.last;
+        if (lastItem['kelas_id'] == sMap['kelas_id'] &&
+            lastItem['mata_pelajaran_id'] == sMap['mata_pelajaran_id']) {
+          lastGroup.add(sMap);
+          continue;
+        }
+      }
+      groups.add([sMap]);
+    }
+
+    for (var group in groups) {
+      dynamic journal;
+      for (var s in group) {
+        if ((s['jurnal_harian'] as List).isNotEmpty) {
+          journal = s['jurnal_harian'];
+          break;
+        }
+      }
+      if (journal != null) {
+        for (var s in group) {
+          s['jurnal_harian'] = journal;
+        }
+      }
+    }
+
+    schedules.value = groups.expand((g) => g).toList();
+    journals.value = results[1];
+  }
+
+  Future<void> fetchDataByDate(DateTime date) async {
+    isLoading.value = true;
+    try {
+      await _fetchSchedulesAndJournals(date);
     } catch (e) {
       print('Fetch Error: $e');
+    } finally {
+      isLoading.value = false;
     }
   }
 
@@ -86,17 +127,30 @@ class DetailGuruController extends GetxController {
     isLoading.value = true;
     try {
       final userId = supabase.auth.currentUser?.id;
+      final now = DateTime.now().toIso8601String();
+
       await supabase
           .from('jurnal_harian')
           .update({
             'status': status,
             'validated_by': userId,
-            'validated_at': DateTime.now().toIso8601String(),
+            'validated_at': now,
             'catatan_admin': catatanAdmin,
           })
           .eq('id', id);
 
-      await fetchDataByDate(selectedDate.value);
+      // Update local state in-place — avoids full network re-fetch
+      final idx = journals.indexWhere((j) => j['id'] == id);
+      if (idx != -1) {
+        final updated = Map<String, dynamic>.from(journals[idx]);
+        updated['status'] = status;
+        updated['catatan_admin'] = catatanAdmin;
+        updated['validated_by'] = userId;
+        updated['validated_at'] = now;
+        journals[idx] = updated;
+        journals.refresh();
+      }
+
       Get.snackbar('Berhasil', 'Status jurnal diperbarui menjadi $status');
     } catch (e) {
       Get.snackbar('Gagal', 'Gagal memperbarui jurnal: $e');
@@ -490,7 +544,7 @@ class DetailGuruPage extends StatelessWidget {
     final bool isApproved = status == 'approved' || status == 'disetujui';
     final bool isRejected = status == 'rejected' || status == 'ditolak';
 
-    final List presensi = j['presensi_siswa'] as List? ?? [];
+    final List presensi = j['presensi_json'] as List? ?? [];
     int sCount = presensi
         .where((p) => p['status'].toString().toUpperCase().startsWith('S'))
         .length;
@@ -584,7 +638,7 @@ class DetailGuruPage extends StatelessWidget {
   ) {
     final schedule = j['jadwal'] ?? {};
     final guru = controller.guruProfile;
-    final List presensi = j['presensi_siswa'] as List? ?? [];
+    final List presensi = j['presensi_json'] as List? ?? [];
 
     final String photoStr = j['foto_lampiran_url']?.toString() ?? "";
     final List<String> photoList = photoStr.isNotEmpty
@@ -748,7 +802,7 @@ class DetailGuruPage extends StatelessWidget {
                                   : Colors.red),
                       ),
                       title: Text(
-                        p['master_siswa']?['nama_siswa'] ??
+                        p['nama_siswa'] ??
                             'Siswa Tidak Dikenal',
                         style: const TextStyle(fontSize: 14),
                       ),

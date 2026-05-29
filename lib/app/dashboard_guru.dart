@@ -117,7 +117,7 @@ class DashboardGuru extends StatelessWidget {
                             else
                               ...controller.groupedSchedules.map((group) {
                                 final firstSchedule = group.first;
-                                bool sudahDiisi = group.every(
+                                bool sudahDiisi = group.any(
                                   (s) =>
                                       (s['jurnal_harian'] as List).isNotEmpty,
                                 );
@@ -185,7 +185,7 @@ class DashboardGuru extends StatelessWidget {
                                 String status = jurnal['status'] ?? 'pending';
 
                                 // Perbaikan Presensi Riil
-                                final List presensi = jurnal['presensi_siswa'] as List? ?? [];
+                                final List presensi = jurnal['presensi_json'] as List? ?? [];
                                 int sCount = presensi.where((p) => p['status'].toString().toUpperCase().startsWith('S')).length;
                                 int iCount = presensi.where((p) => p['status'].toString().toUpperCase().startsWith('I')).length;
                                 int aCount = presensi.where((p) => p['status'].toString().toUpperCase().startsWith('A')).length;
@@ -649,7 +649,7 @@ class DashboardGuru extends StatelessWidget {
                             : [schedule],
                         isEdit: sudahDiisi,
                         jurnalId: sudahDiisi
-                            ? schedule['jurnal_harian'][0]['id']
+                            ? (groupedSchedules.firstWhere((s) => (s['jurnal_harian'] as List).isNotEmpty)['jurnal_harian'] as List)[0]['id']
                             : null,
                       ),
                     )?.then((value) {
