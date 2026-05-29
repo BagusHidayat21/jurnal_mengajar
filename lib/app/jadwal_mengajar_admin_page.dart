@@ -48,13 +48,14 @@ class JadwalMengajarAdminController extends GetxController {
     isLoading.value = true;
     try {
       final dateStr = DateFormat('yyyy-MM-dd').format(date);
+      final weekday = date.weekday % 7;
 
       final response = await supabase
           .from('jadwal_mengajar')
           .select(
             '*, profiles:guru_id(id,nama_lengkap,foto_url), master_periode(nama_periode), master_kelas(nama_kelas), master_mata_pelajaran(nama_mata_pelajaran), master_jam(jam_ke,waktu_reguler,waktu_puasa)',
           )
-          .eq('tanggal', dateStr)
+          .or('tanggal.eq.$dateStr,and(tanggal.is.null,hari.eq.$weekday)')
           .order('jam_id', ascending: true);
 
       schedules.assignAll(response);
@@ -62,9 +63,17 @@ class JadwalMengajarAdminController extends GetxController {
       if (showBelumInputOnly.value) {
         final resJurnal = await supabase
             .from('jurnal_harian')
-            .select('jadwal_id')
+            .select('jadwal_id, jadwal_ids')
             .eq('tanggal', dateStr);
-        final filledJadwalIds = resJurnal.map((j) => j['jadwal_id']).toSet();
+        final filledJadwalIds = <int>{};
+        for (var j in resJurnal) {
+          if (j['jadwal_id'] != null) {
+            filledJadwalIds.add(j['jadwal_id'] as int);
+          }
+          if (j['jadwal_ids'] != null) {
+            filledJadwalIds.addAll(List<int>.from(j['jadwal_ids']));
+          }
+        }
 
         schedules.value = schedules
             .where((s) => !filledJadwalIds.contains(s['id']))
@@ -496,10 +505,11 @@ class FormJadwalController extends GetxController {
 
     try {
       final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate.value);
+      final weekday = selectedDate.value.weekday % 7;
       var query = supabase
           .from('jadwal_mengajar')
           .select('jam_id')
-          .eq('tanggal', dateStr)
+          .or('tanggal.eq.$dateStr,and(tanggal.is.null,hari.eq.$weekday)')
           .eq('kelas_id', selectedKelasId.value!);
 
       if (existingData != null) {
@@ -516,44 +526,28 @@ class FormJadwalController extends GetxController {
   Future<void> fetchDropdownData() async {
     isLoading.value = true;
     try {
-      final resPeriode = await supabase
-          .from('master_periode')
-          .select()
-          .eq('is_active', true);
-      periodeList.value = resPeriode;
+      // Fetch all dropdown data in parallel — no dependency between these queries
+      final results = await Future.wait([
+        supabase.from('master_periode').select('id, nama_periode, is_active').eq('is_active', true),
+        supabase.from('master_jam').select('id, jam_ke, waktu_reguler, waktu_puasa').order('jam_ke', ascending: true),
+        supabase.from('master_kelas').select('id, nama_kelas').order('nama_kelas'),
+        supabase.from('master_mata_pelajaran').select('id, nama_mata_pelajaran').order('nama_mata_pelajaran'),
+        supabase.from('profiles').select('id, nama_lengkap, foto_url').eq('role', 'guru').order('nama_lengkap'),
+      ]);
 
-      final resJam = await supabase
-          .from('master_jam')
-          .select()
-          .order('jam_ke', ascending: true);
+      periodeList.value = results[0];
 
-      // Explicit sort in Dart to handle potential string types or DB inconsistencies
+      final resJam = List<Map<String, dynamic>>.from(results[1]);
       resJam.sort(
         (a, b) => (int.tryParse(a['jam_ke'].toString()) ?? 0).compareTo(
           int.tryParse(b['jam_ke'].toString()) ?? 0,
         ),
       );
-
       jamList.value = resJam;
 
-      final resKelas = await supabase
-          .from('master_kelas')
-          .select()
-          .order('nama_kelas');
-      kelasList.value = resKelas;
-
-      final resMapel = await supabase
-          .from('master_mata_pelajaran')
-          .select()
-          .order('nama_mata_pelajaran');
-      mapelList.value = resMapel;
-
-      final resGuru = await supabase
-          .from('profiles')
-          .select()
-          .eq('role', 'guru')
-          .order('nama_lengkap');
-      guruList.value = resGuru;
+      kelasList.value = results[2];
+      mapelList.value = results[3];
+      guruList.value = results[4];
 
       // Populate existing data if Editing
       if (existingData != null) {
@@ -567,6 +561,7 @@ class FormJadwalController extends GetxController {
         // Just adding: load from settings
         final prefs = await SharedPreferences.getInstance();
         final savedPeriode = prefs.getInt('active_periode_id');
+        final resPeriode = results[0];
         if (savedPeriode != null &&
             resPeriode.any((p) => p['id'] == savedPeriode)) {
           selectedPeriodeId.value = savedPeriode;
@@ -598,19 +593,31 @@ class FormJadwalController extends GetxController {
     try {
       if (existingData == null) {
         List<Map<String, dynamic>> batchData = [];
-        int totalWeeks = isRepeat.value ? 24 : 1;
 
-        for (int w = 0; w < totalWeeks; w++) {
-          DateTime currDate = selectedDate.value.add(Duration(days: w * 7));
-
+        if (isRepeat.value) {
+          // repeating schedules stored with tanggal = null
           for (var jamId in selectedJamIds) {
             batchData.add({
               'guru_id': selectedGuruId.value,
               'periode_id': selectedPeriodeId.value,
               'kelas_id': selectedKelasId.value,
               'mata_pelajaran_id': selectedMapelId.value,
-              'hari': currDate.weekday % 7,
-              'tanggal': DateFormat('yyyy-MM-dd').format(currDate),
+              'hari': selectedDate.value.weekday % 7,
+              'tanggal': null,
+              'jam_id': jamId,
+              'is_active': isActive.value,
+            });
+          }
+        } else {
+          // single-date schedule stored with specific date
+          for (var jamId in selectedJamIds) {
+            batchData.add({
+              'guru_id': selectedGuruId.value,
+              'periode_id': selectedPeriodeId.value,
+              'kelas_id': selectedKelasId.value,
+              'mata_pelajaran_id': selectedMapelId.value,
+              'hari': selectedDate.value.weekday % 7,
+              'tanggal': DateFormat('yyyy-MM-dd').format(selectedDate.value),
               'jam_id': jamId,
               'is_active': isActive.value,
             });
@@ -625,7 +632,9 @@ class FormJadwalController extends GetxController {
           'kelas_id': selectedKelasId.value,
           'mata_pelajaran_id': selectedMapelId.value,
           'hari': selectedDate.value.weekday % 7,
-          'tanggal': DateFormat('yyyy-MM-dd').format(selectedDate.value),
+          'tanggal': existingData!['tanggal'] == null
+              ? null
+              : DateFormat('yyyy-MM-dd').format(selectedDate.value),
           'jam_id':
               selectedJamIds.first, // In edit mode we only allow 1 jam update
           'is_active': isActive.value,
