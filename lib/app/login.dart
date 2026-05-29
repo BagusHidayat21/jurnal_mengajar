@@ -58,7 +58,7 @@ class _LoginState extends State<Login> {
         // Fetch role from profiles table
         final List<dynamic> profileData = await _supabase
             .from('profiles')
-            .select()
+            .select('role')
             .eq('id', response.user!.id);
 
         if (profileData.isNotEmpty) {

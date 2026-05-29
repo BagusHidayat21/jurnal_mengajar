@@ -34,25 +34,44 @@ class DashboardAdminController extends GetxController {
     isLoading.value = true;
     try {
       final dateStr = DateFormat('yyyy-MM-dd').format(date);
+      final weekday = date.weekday % 7;
       
-      // Get all jadwal for the date
+      // Get all jadwal for the date, resolving repeating templates
       final resJadwal = await supabase
           .from('jadwal_mengajar')
-          .select('id')
-          .eq('tanggal', dateStr)
-          .eq('is_active', true);
+          .select('id, kelas_id, mata_pelajaran_id, guru_id, jam_id')
+          .or('tanggal.eq.$dateStr,and(tanggal.is.null,hari.eq.$weekday)')
+          .eq('is_active', true)
+          .order('jam_id', ascending: true);
       
-      totalJadwal.value = resJadwal.length;
+      // Group consecutive schedules with same teacher, class, and subject (session level)
+      List<List<Map<String, dynamic>>> groups = [];
+      for (var s in resJadwal) {
+        final sMap = Map<String, dynamic>.from(s);
+        if (groups.isNotEmpty) {
+          final lastGroup = groups.last;
+          final lastItem = lastGroup.last;
+          if (lastItem['kelas_id'] == sMap['kelas_id'] &&
+              lastItem['mata_pelajaran_id'] == sMap['mata_pelajaran_id'] &&
+              lastItem['guru_id'] == sMap['guru_id']) {
+            lastGroup.add(sMap);
+            continue;
+          }
+        }
+        groups.add([sMap]);
+      }
 
-      // Get all jurnal entries for these jadwal
+      totalJadwal.value = groups.length;
+
+      // Get only needed columns — avoids pulling heavy presensi_json payload
       final resJurnal = await supabase
           .from('jurnal_harian')
-          .select()
+          .select('id, status, jadwal_id, jadwal_ids')
           .eq('tanggal', dateStr);
           
       totalJurnal.value = resJurnal.length;
       
-      totalApproved.value = resJurnal.where((j) => j['status'] == 'approved' || j['is_verified'] == true).length;
+      totalApproved.value = resJurnal.where((j) => j['status'] == 'approved' || j['status'] == 'disetujui').length;
       
       totalBelumInput.value = totalJadwal.value - totalJurnal.value;
       if (totalBelumInput.value < 0) totalBelumInput.value = 0;
