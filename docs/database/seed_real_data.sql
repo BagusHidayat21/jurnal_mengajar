@@ -16,11 +16,56 @@ TRUNCATE
   public.profiles
 RESTART IDENTITY CASCADE;
 
--- 2. Seed Profil Pengguna (Sesuai dengan User Auth di Supabase)
-INSERT INTO public.profiles (id, email, nama_lengkap, role, jabatan, alamat, no_telp, foto_url) VALUES
-('a3333333-3333-3333-3333-333333333333', 'admin@jurnal.com', 'Drs. H. Mulyadi, M.Pd.', 'admin', 'Kepala Sekolah / Admin', 'Jl. Danau Ranau No. 8, Sawojajar, Malang', '081234567890', NULL),
-('a1111111-1111-1111-1111-111111111111', 'guru1@jurnal.com', 'Ahmad Subarjo, S.Kom.', 'guru', 'Ketua Program Keahlian RPL', 'Jl. Raya Sulfat No. 12, Blimbing, Malang', '085731112223', NULL),
-('a2222222-2222-2222-2222-222222222222', 'guru2@jurnal.com', 'Siti Aminah, S.Pd.', 'guru', 'Guru Produktif RPL', 'Jl. Sigura-gura No. 5, Lowokwaru, Malang', '081999888777', NULL);
+-- 2. Seed User Auth dan Profil Pengguna menggunakan ID dinamis
+CREATE TEMP TABLE temp_seeding_users (
+  role_name text PRIMARY KEY,
+  id uuid NOT NULL
+);
+
+INSERT INTO temp_seeding_users (role_name, id) VALUES
+('admin', gen_random_uuid()),
+('guru1', gen_random_uuid()),
+('guru2', gen_random_uuid());
+
+INSERT INTO auth.users (
+  instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, 
+  raw_app_meta_data, raw_user_meta_data, created_at, updated_at, 
+  confirmation_token, email_change, email_change_token_new, recovery_token
+) VALUES 
+('00000000-0000-0000-0000-000000000000', (SELECT id FROM temp_seeding_users WHERE role_name = 'admin'), 'authenticated', 'authenticated', 'admin@jurnal.com', crypt('admin123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name":"Super Admin"}', now(), now(), '', '', '', ''),
+('00000000-0000-0000-0000-000000000000', (SELECT id FROM temp_seeding_users WHERE role_name = 'guru1'), 'authenticated', 'authenticated', 'guru1@jurnal.com', crypt('password123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name":"Budi Santoso"}', now(), now(), '', '', '', ''),
+('00000000-0000-0000-0000-000000000000', (SELECT id FROM temp_seeding_users WHERE role_name = 'guru2'), 'authenticated', 'authenticated', 'guru2@jurnal.com', crypt('password123', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}', '{"full_name":"Dewi Lestari"}', now(), now(), '', '', '', '');
+
+-- Update profil yang dibuat secara otomatis oleh trigger handle_new_user
+UPDATE public.profiles
+SET 
+  nama_lengkap = 'Drs. H. Mulyadi, M.Pd.',
+  role = 'admin',
+  jabatan = 'Kepala Sekolah / Admin',
+  alamat = 'Jl. Danau Ranau No. 8, Sawojajar, Malang',
+  no_telp = '081234567890',
+  email = 'admin@jurnal.com'
+WHERE id = (SELECT id FROM temp_seeding_users WHERE role_name = 'admin');
+
+UPDATE public.profiles
+SET 
+  nama_lengkap = 'Ahmad Subarjo, S.Kom.',
+  role = 'guru',
+  jabatan = 'Ketua Program Keahlian RPL',
+  alamat = 'Jl. Raya Sulfat No. 12, Blimbing, Malang',
+  no_telp = '085731112223',
+  email = 'guru1@jurnal.com'
+WHERE id = (SELECT id FROM temp_seeding_users WHERE role_name = 'guru1');
+
+UPDATE public.profiles
+SET 
+  nama_lengkap = 'Siti Aminah, S.Pd.',
+  role = 'guru',
+  jabatan = 'Guru Produktif RPL',
+  alamat = 'Jl. Sigura-gura No. 5, Lowokwaru, Malang',
+  no_telp = '081999888777',
+  email = 'guru2@jurnal.com'
+WHERE id = (SELECT id FROM temp_seeding_users WHERE role_name = 'guru2');
 
 -- 3. Seed Master Kelas
 INSERT INTO public.master_kelas (id, nama_kelas) VALUES
@@ -184,29 +229,28 @@ INSERT INTO public.master_siswa (id, nama_siswa, nisn, kelas_id, no_hp_ortu) VAL
 SELECT setval(pg_get_serial_sequence('public.master_siswa', 'id'), COALESCE((SELECT MAX(id)+1 FROM public.master_siswa), 1), false);
 
 -- 8. Seed Jadwal Mengajar (Schedules) - Periode Genap (id = 2)
--- Catatan: guru1 = a1111111-1111-1111-1111-111111111111, guru2 = a2222222-2222-2222-2222-222222222222
 INSERT INTO public.jadwal_mengajar (id, guru_id, periode_id, kelas_id, mata_pelajaran_id, jam_id, hari, tanggal, is_active) VALUES
 -- Senin (hari = 1)
-(1, 'a2222222-2222-2222-2222-222222222222', 2, 1, 12, 1, 1, NULL, true), -- Siti: X RPL 1 - Desain Grafis Jam 1
-(2, 'a2222222-2222-2222-2222-222222222222', 2, 1, 12, 2, 1, NULL, true), -- Siti: X RPL 1 - Desain Grafis Jam 2
-(3, 'a1111111-1111-1111-1111-111111111111', 2, 3, 1, 3, 1, NULL, true),  -- Ahmad: XI RPL 1 - Pemrograman Web Jam 3
-(4, 'a1111111-1111-1111-1111-111111111111', 2, 3, 1, 4, 1, NULL, true),  -- Ahmad: XI RPL 1 - Pemrograman Web Jam 4
+(1, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru2'), 2, 1, 12, 1, 1, NULL, true), -- Siti: X RPL 1 - Desain Grafis Jam 1
+(2, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru2'), 2, 1, 12, 2, 1, NULL, true), -- Siti: X RPL 1 - Desain Grafis Jam 2
+(3, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru1'), 2, 3, 1, 3, 1, NULL, true),  -- Ahmad: XI RPL 1 - Pemrograman Web Jam 3
+(4, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru1'), 2, 3, 1, 4, 1, NULL, true),  -- Ahmad: XI RPL 1 - Pemrograman Web Jam 4
 
 -- Selasa (hari = 2)
-(5, 'a2222222-2222-2222-2222-222222222222', 2, 2, 12, 1, 2, NULL, true), -- Siti: X RPL 2 - Desain Grafis Jam 1
-(6, 'a2222222-2222-2222-2222-222222222222', 2, 2, 12, 2, 2, NULL, true), -- Siti: X RPL 2 - Desain Grafis Jam 2
-(7, 'a2222222-2222-2222-2222-222222222222', 2, 4, 2, 3, 2, NULL, true),  -- Siti: XI RPL 2 - Basis Data Jam 3
-(8, 'a2222222-2222-2222-2222-222222222222', 2, 4, 2, 4, 2, NULL, true),  -- Siti: XI RPL 2 - Basis Data Jam 4
-(9, 'a1111111-1111-1111-1111-111111111111', 2, 6, 3, 5, 2, NULL, true),  -- Ahmad: XII RPL 2 - PBO Jam 5
-(10, 'a1111111-1111-1111-1111-111111111111', 2, 6, 3, 6, 2, NULL, true),  -- Ahmad: XII RPL 2 - PBO Jam 6
+(5, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru2'), 2, 2, 12, 1, 2, NULL, true), -- Siti: X RPL 2 - Desain Grafis Jam 1
+(6, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru2'), 2, 2, 12, 2, 2, NULL, true), -- Siti: X RPL 2 - Desain Grafis Jam 2
+(7, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru2'), 2, 4, 2, 3, 2, NULL, true),  -- Siti: XI RPL 2 - Basis Data Jam 3
+(8, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru2'), 2, 4, 2, 4, 2, NULL, true),  -- Siti: XI RPL 2 - Basis Data Jam 4
+(9, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru1'), 2, 6, 3, 5, 2, NULL, true),  -- Ahmad: XII RPL 2 - PBO Jam 5
+(10, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru1'), 2, 6, 3, 6, 2, NULL, true),  -- Ahmad: XII RPL 2 - PBO Jam 6
 
 -- Rabu (hari = 3)
-(11, 'a1111111-1111-1111-1111-111111111111', 2, 1, 4, 1, 3, NULL, true),  -- Ahmad: X RPL 1 - Matematika Jam 1
-(12, 'a1111111-1111-1111-1111-111111111111', 2, 1, 4, 2, 3, NULL, true),  -- Ahmad: X RPL 1 - Matematika Jam 2
-(13, 'a2222222-2222-2222-2222-222222222222', 2, 3, 2, 3, 3, NULL, true),  -- Siti: XI RPL 1 - Basis Data Jam 3
-(14, 'a2222222-2222-2222-2222-222222222222', 2, 3, 2, 4, 3, NULL, true),  -- Siti: XI RPL 1 - Basis Data Jam 4
-(15, 'a1111111-1111-1111-1111-111111111111', 2, 5, 11, 5, 3, NULL, true), -- Ahmad: XII RPL 1 - PKK Jam 5
-(16, 'a1111111-1111-1111-1111-111111111111', 2, 5, 11, 6, 3, NULL, true); -- Ahmad: XII RPL 1 - PKK Jam 6
+(11, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru1'), 2, 1, 4, 1, 3, NULL, true),  -- Ahmad: X RPL 1 - Matematika Jam 1
+(12, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru1'), 2, 1, 4, 2, 3, NULL, true),  -- Ahmad: X RPL 1 - Matematika Jam 2
+(13, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru2'), 2, 3, 2, 3, 3, NULL, true),  -- Siti: XI RPL 1 - Basis Data Jam 3
+(14, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru2'), 2, 3, 2, 4, 3, NULL, true),  -- Siti: XI RPL 1 - Basis Data Jam 4
+(15, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru1'), 2, 5, 11, 5, 3, NULL, true), -- Ahmad: XII RPL 1 - PKK Jam 5
+(16, (SELECT id FROM temp_seeding_users WHERE role_name = 'guru1'), 2, 5, 11, 6, 3, NULL, true); -- Ahmad: XII RPL 1 - PKK Jam 6
 
 -- Reset sequence untuk jadwal_mengajar
 SELECT setval(pg_get_serial_sequence('public.jadwal_mengajar', 'id'), COALESCE((SELECT MAX(id)+1 FROM public.jadwal_mengajar), 1), false);
@@ -221,7 +265,7 @@ INSERT INTO public.pengaturan_aplikasi (id, nobox_token, nobox_account_ids, bata
 -- Jurnal 1: Senin, 25 Mei 2026 (XI RPL 1 - Pemrograman Web Jam 3 & 4) - Guru: Ahmad Subarjo (id_jadwal = 3 atau 4)
 -- Kita pakai jadwal_id = 3
 INSERT INTO public.jurnal_harian (id, jadwal_id, tanggal, materi, catatan, foto_lampiran_url, status, catatan_admin, validated_by, validated_at, is_telat, jadwal_ids) VALUES
-(1, 3, '2026-05-25', 'Pengenalan dan Instalasi Node.js serta NPM', 'Siswa berhasil menginstal Node.js di komputer masing-masing. Praktikum berjalan lancar.', NULL, 'approved', 'Bagus, teruskan progres praktikum', 'a3333333-3333-3333-3333-333333333333', '2026-05-25 15:00:00+00', false, ARRAY[3, 4]::bigint[]);
+(1, 3, '2026-05-25', 'Pengenalan dan Instalasi Node.js serta NPM', 'Siswa berhasil menginstal Node.js di komputer masing-masing. Praktikum berjalan lancar.', NULL, 'approved', 'Bagus, teruskan progres praktikum', (SELECT id FROM temp_seeding_users WHERE role_name = 'admin'), '2026-05-25 15:00:00+00', false, ARRAY[3, 4]::bigint[]);
 
 -- Presensi untuk Jurnal 1 (Siswa XI RPL 1: id 31 s/d 45)
 INSERT INTO public.presensi_siswa (jurnal_id, siswa_id, kelas_id, status) VALUES
@@ -232,7 +276,7 @@ INSERT INTO public.presensi_siswa (jurnal_id, siswa_id, kelas_id, status) VALUES
 
 -- Jurnal 2: Senin, 25 Mei 2026 (X RPL 1 - Desain Grafis Jam 1 & 2) - Guru: Siti Aminah (id_jadwal = 1)
 INSERT INTO public.jurnal_harian (id, jadwal_id, tanggal, materi, catatan, foto_lampiran_url, status, catatan_admin, validated_by, validated_at, is_telat, jadwal_ids) VALUES
-(2, 1, '2026-05-25', 'Konsep Desain Vektor dan Bitmap', 'Menjelaskan perbedaan vektor dan bitmap beserta aplikasinya.', NULL, 'approved', 'Dokumentasi lengkap', 'a3333333-3333-3333-3333-333333333333', '2026-05-25 15:10:00+00', false, ARRAY[1, 2]::bigint[]);
+(2, 1, '2026-05-25', 'Konsep Desain Vektor dan Bitmap', 'Menjelaskan perbedaan vektor dan bitmap beserta aplikasinya.', NULL, 'approved', 'Dokumentasi lengkap', (SELECT id FROM temp_seeding_users WHERE role_name = 'admin'), '2026-05-25 15:10:00+00', false, ARRAY[1, 2]::bigint[]);
 
 -- Presensi untuk Jurnal 2 (Siswa X RPL 1: id 1 s/d 15)
 INSERT INTO public.presensi_siswa (jurnal_id, siswa_id, kelas_id, status) VALUES
@@ -243,7 +287,7 @@ INSERT INTO public.presensi_siswa (jurnal_id, siswa_id, kelas_id, status) VALUES
 
 -- Jurnal 3: Selasa, 26 Mei 2026 (XI RPL 2 - Basis Data Jam 3 & 4) - Guru: Siti Aminah (id_jadwal = 7)
 INSERT INTO public.jurnal_harian (id, jadwal_id, tanggal, materi, catatan, foto_lampiran_url, status, catatan_admin, validated_by, validated_at, is_telat, jadwal_ids) VALUES
-(3, 7, '2026-05-26', 'Perancangan Entity Relationship Diagram (ERD)', 'Siswa membuat ERD untuk sistem perpustakaan sekolah.', NULL, 'approved', 'ERD sudah sesuai standar', 'a3333333-3333-3333-3333-333333333333', '2026-05-26 16:00:00+00', false, ARRAY[7, 8]::bigint[]);
+(3, 7, '2026-05-26', 'Perancangan Entity Relationship Diagram (ERD)', 'Siswa membuat ERD untuk sistem perpustakaan sekolah.', NULL, 'approved', 'ERD sudah sesuai standar', (SELECT id FROM temp_seeding_users WHERE role_name = 'admin'), '2026-05-26 16:00:00+00', false, ARRAY[7, 8]::bigint[]);
 
 -- Presensi untuk Jurnal 3 (Siswa XI RPL 2: id 46 s/d 60)
 INSERT INTO public.presensi_siswa (jurnal_id, siswa_id, kelas_id, status) VALUES
@@ -254,7 +298,7 @@ INSERT INTO public.presensi_siswa (jurnal_id, siswa_id, kelas_id, status) VALUES
 
 -- Jurnal 4: Rabu, 27 Mei 2026 (XI RPL 1 - Basis Data Jam 3 & 4) - Guru: Siti Aminah (id_jadwal = 13)
 INSERT INTO public.jurnal_harian (id, jadwal_id, tanggal, materi, catatan, foto_lampiran_url, status, catatan_admin, validated_by, validated_at, is_telat, jadwal_ids) VALUES
-(4, 13, '2026-05-27', 'Implementasi DDL (Data Definition Language) SQL', 'Praktik membuat database, table, dan primary key di phpMyAdmin.', NULL, 'approved', 'Sangat baik', 'a3333333-3333-3333-3333-333333333333', '2026-05-27 15:30:00+00', false, ARRAY[13, 14]::bigint[]);
+(4, 13, '2026-05-27', 'Implementasi DDL (Data Definition Language) SQL', 'Praktik membuat database, table, dan primary key di phpMyAdmin.', NULL, 'approved', 'Sangat baik', (SELECT id FROM temp_seeding_users WHERE role_name = 'admin'), '2026-05-27 15:30:00+00', false, ARRAY[13, 14]::bigint[]);
 
 -- Presensi untuk Jurnal 4 (Siswa XI RPL 1: id 31 s/d 45)
 INSERT INTO public.presensi_siswa (jurnal_id, siswa_id, kelas_id, status) VALUES
@@ -265,7 +309,7 @@ INSERT INTO public.presensi_siswa (jurnal_id, siswa_id, kelas_id, status) VALUES
 
 -- Jurnal 5: Senin, 1 Juni 2026 (XI RPL 1 - Pemrograman Web Jam 3 & 4) - Guru: Ahmad Subarjo (id_jadwal = 3)
 INSERT INTO public.jurnal_harian (id, jadwal_id, tanggal, materi, catatan, foto_lampiran_url, status, catatan_admin, validated_by, validated_at, is_telat, jadwal_ids) VALUES
-(5, 3, '2026-06-01', 'Membuat Routing dan Controller di ExpressJS', 'Siswa mempelajari HTTP methods (GET, POST, PUT, DELETE) pada router.', NULL, 'approved', 'Kerja bagus', 'a3333333-3333-3333-3333-333333333333', '2026-06-01 16:00:00+00', false, ARRAY[3, 4]::bigint[]);
+(5, 3, '2026-06-01', 'Membuat Routing dan Controller di ExpressJS', 'Siswa mempelajari HTTP methods (GET, POST, PUT, DELETE) pada router.', NULL, 'approved', 'Kerja bagus', (SELECT id FROM temp_seeding_users WHERE role_name = 'admin'), '2026-06-01 16:00:00+00', false, ARRAY[3, 4]::bigint[]);
 
 -- Presensi untuk Jurnal 5 (Siswa XI RPL 1: id 31 s/d 45)
 INSERT INTO public.presensi_siswa (jurnal_id, siswa_id, kelas_id, status) VALUES
