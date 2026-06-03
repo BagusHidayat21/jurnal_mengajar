@@ -43,64 +43,56 @@ class DashboardGuruController extends GetxController {
     }
   }
 
-  /// Fetches schedules and journals in parallel for a given user and date.
+  /// Fetches schedules and journals using views, maps journals locally, and sorts schedules.
   Future<void> _fetchSchedulesAndJournals(String userId, DateTime date) async {
     final dateStr = DateFormat('yyyy-MM-dd').format(date);
     final weekday = date.weekday % 7;
 
     final results = await Future.wait([
       supabase
-          .from('jadwal_mengajar')
-          .select('*, master_kelas(nama_kelas), master_mata_pelajaran(nama_mata_pelajaran), master_jam(*), jurnal_harian(id)')
+          .from('v_jadwal_mengajar')
+          .select('*')
           .eq('guru_id', userId)
           .or('tanggal.eq.$dateStr,and(tanggal.is.null,hari.eq.$weekday)')
-          .eq('jurnal_harian.tanggal', dateStr)
-          .eq('is_active', true)
-          .order('jam_id', ascending: true),
+          .eq('is_active', true),
       supabase
-          .from('jurnal_harian')
-          .select('*, jadwal_mengajar!inner(*, master_kelas(nama_kelas), master_mata_pelajaran(nama_mata_pelajaran), master_jam(*))')
-          .eq('jadwal_mengajar.guru_id', userId)
+          .from('v_jurnal_harian')
+          .select('*')
+          .eq('guru_id', userId)
           .eq('tanggal', dateStr),
     ]);
 
     final scheduleRes = List<Map<String, dynamic>>.from(results[0]);
+    final journalRes = List<Map<String, dynamic>>.from(results[1]);
 
-    // Group consecutive schedules with same kelas_id + mata_pelajaran_id
-    List<List<Map<String, dynamic>>> groups = [];
+    // Map journals to schedules
     for (var s in scheduleRes) {
-      final sMap = Map<String, dynamic>.from(s);
-      if (groups.isNotEmpty) {
-        final lastGroup = groups.last;
-        final lastItem = lastGroup.last;
-        if (lastItem['kelas_id'] == sMap['kelas_id'] &&
-            lastItem['mata_pelajaran_id'] == sMap['mata_pelajaran_id']) {
-          lastGroup.add(sMap);
-          continue;
-        }
-      }
-      groups.add([sMap]);
-    }
-
-    // Propagate journal to all items in the group if any item has it
-    for (var group in groups) {
-      dynamic journal;
-      for (var s in group) {
-        if ((s['jurnal_harian'] as List).isNotEmpty) {
-          journal = s['jurnal_harian'];
+      Map<String, dynamic>? matchingJournal;
+      for (var j in journalRes) {
+        if (j['jadwal_id'] == s['id'] || (j['jadwal_ids'] as List?)?.contains(s['id']) == true) {
+          matchingJournal = j;
           break;
         }
       }
-      if (journal != null) {
-        for (var s in group) {
-          s['jurnal_harian'] = journal;
-        }
-      }
+      s['jurnal_harian'] = matchingJournal != null ? [matchingJournal] : [];
     }
+
+    // Sort schedules by the earliest jam_ke
+    scheduleRes.sort((a, b) {
+      final aJams = a['master_jam'] as List? ?? [];
+      final bJams = b['master_jam'] as List? ?? [];
+      if (aJams.isEmpty) return 1;
+      if (bJams.isEmpty) return -1;
+      final aFirst = aJams[0]['jam_ke'] as int? ?? 0;
+      final bFirst = bJams[0]['jam_ke'] as int? ?? 0;
+      return aFirst.compareTo(bFirst);
+    });
+
+    final List<List<Map<String, dynamic>>> groups = scheduleRes.map((s) => [s]).toList();
 
     schedules.value = scheduleRes;
     groupedSchedules.value = groups;
-    journals.value = results[1];
+    journals.value = journalRes;
   }
 
   Future<void> fetchDataByDate(DateTime date) async {

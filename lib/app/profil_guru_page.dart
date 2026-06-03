@@ -73,7 +73,7 @@ class ProfilGuruPage extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final prof = controller.profile.value;
+        final prof = controller.profile;
         String nama = prof['nama_lengkap'] ?? 'Nama Lengkap';
         String jabatan = 'Guru';
         String? fotoUrl = prof['foto_url'];

@@ -39,29 +39,11 @@ class DashboardAdminController extends GetxController {
       // Get all jadwal for the date, resolving repeating templates
       final resJadwal = await supabase
           .from('jadwal_mengajar')
-          .select('id, kelas_id, mata_pelajaran_id, guru_id, jam_id')
+          .select('id, kelas_id, mata_pelajaran_id, guru_id, jam_ids')
           .or('tanggal.eq.$dateStr,and(tanggal.is.null,hari.eq.$weekday)')
-          .eq('is_active', true)
-          .order('jam_id', ascending: true);
+          .eq('is_active', true);
       
-      // Group consecutive schedules with same teacher, class, and subject (session level)
-      List<List<Map<String, dynamic>>> groups = [];
-      for (var s in resJadwal) {
-        final sMap = Map<String, dynamic>.from(s);
-        if (groups.isNotEmpty) {
-          final lastGroup = groups.last;
-          final lastItem = lastGroup.last;
-          if (lastItem['kelas_id'] == sMap['kelas_id'] &&
-              lastItem['mata_pelajaran_id'] == sMap['mata_pelajaran_id'] &&
-              lastItem['guru_id'] == sMap['guru_id']) {
-            lastGroup.add(sMap);
-            continue;
-          }
-        }
-        groups.add([sMap]);
-      }
-
-      totalJadwal.value = groups.length;
+      totalJadwal.value = resJadwal.length;
 
       // Get only needed columns — avoids pulling heavy presensi_json payload
       final resJurnal = await supabase

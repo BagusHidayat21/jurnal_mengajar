@@ -122,23 +122,17 @@ class DashboardGuru extends StatelessWidget {
                                       (s['jurnal_harian'] as List).isNotEmpty,
                                 );
 
-                                String startTime =
-                                    group.first['master_jam']['waktu_reguler']
-                                        ?.split('-')[0]
-                                        .trim() ??
-                                    '';
-                                String endTime =
-                                    group.last['master_jam']['waktu_reguler']
-                                        ?.split('-')[1]
-                                        .trim() ??
-                                    '';
+                                final jams = List<Map<String, dynamic>>.from(
+                                  firstSchedule['master_jam'] is List
+                                      ? firstSchedule['master_jam']
+                                      : [firstSchedule['master_jam']],
+                                );
+                                jams.sort((a, b) => (a['jam_ke'] as int).compareTo(b['jam_ke'] as int));
+
+                                String startTime = jams.first['waktu_reguler']?.split('-')[0].trim() ?? '';
+                                String endTime = jams.last['waktu_reguler']?.split('-')[1].trim() ?? '';
                                 String time = '$startTime - $endTime';
-                                String jamKeList = group
-                                    .map(
-                                      (s) =>
-                                          s['master_jam']['jam_ke'].toString(),
-                                    )
-                                    .join(', ');
+                                String jamKeList = jams.map((j) => j['jam_ke'].toString()).join(', ');
 
                                 return _buildJadwalCard(
                                   time,
@@ -456,27 +450,18 @@ class DashboardGuru extends StatelessWidget {
     DashboardGuruController controller, {
     List<Map<String, dynamic>> groupedSchedules = const [],
   }) {
-    // Build combined time from group
-    String time;
-    String jamKeLabel;
-    if (groupedSchedules.length > 1) {
-      String firstTime =
-          groupedSchedules.first['master_jam']['waktu_reguler']
-              ?.split('-')[0]
-              .trim() ??
-          '';
-      String lastTime =
-          groupedSchedules.last['master_jam']['waktu_reguler']
-              ?.split('-')[1]
-              .trim() ??
-          '';
-      time = '$firstTime - $lastTime';
-      jamKeLabel =
-          'Jam ke ${groupedSchedules.map((s) => s['master_jam']['jam_ke'].toString()).join(', ')}';
-    } else {
-      time = schedule['master_jam']['waktu_reguler'] ?? '';
-      jamKeLabel = 'Jam ke ${schedule['master_jam']['jam_ke']}';
-    }
+    // Build combined time from schedule hours
+    final jams = List<Map<String, dynamic>>.from(
+      schedule['master_jam'] is List
+          ? schedule['master_jam']
+          : [schedule['master_jam']],
+    );
+    jams.sort((a, b) => (a['jam_ke'] as int).compareTo(b['jam_ke'] as int));
+
+    String firstTime = jams.first['waktu_reguler']?.split('-')[0].trim() ?? '';
+    String lastTime = jams.last['waktu_reguler']?.split('-')[1].trim() ?? '';
+    String time = '$firstTime - $lastTime';
+    String jamKeLabel = 'Jam ke ${jams.map((j) => j['jam_ke'].toString()).join(', ')}';
     String dateStr = schedule['tanggal'];
     DateTime scheduleDate = DateTime.parse(dateStr);
     String formattedDate = DateFormat('dd MMMM yyyy').format(scheduleDate);

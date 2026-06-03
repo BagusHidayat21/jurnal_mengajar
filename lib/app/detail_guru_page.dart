@@ -50,58 +50,46 @@ class DetailGuruController extends GetxController {
 
     final results = await Future.wait([
       supabase
-          .from('jadwal_mengajar')
-          .select(
-            '*, master_kelas(nama_kelas), master_mata_pelajaran(nama_mata_pelajaran), master_jam(*), jurnal_harian(id, status)',
-          )
+          .from('v_jadwal_mengajar')
+          .select('*')
           .eq('guru_id', guruId)
           .or('tanggal.eq.$dateStr,and(tanggal.is.null,hari.eq.$weekday)')
-          .eq('jurnal_harian.tanggal', dateStr)
           .eq('is_active', true),
       supabase
-          .from('jurnal_harian')
-          .select(
-            '*, jadwal:jadwal_mengajar!inner(*, master_kelas(*), master_mata_pelajaran(*), master_jam(*))',
-          )
-          .eq('jadwal.guru_id', guruId)
+          .from('v_jurnal_harian')
+          .select('*')
+          .eq('guru_id', guruId)
           .eq('tanggal', dateStr),
     ]);
 
     final scheduleRes = List<Map<String, dynamic>>.from(results[0]);
+    final journalRes = List<Map<String, dynamic>>.from(results[1]);
 
-    // Group and propagate journal for consecutive schedules
-    List<List<Map<String, dynamic>>> groups = [];
+    // Map journals to schedules
     for (var s in scheduleRes) {
-      final sMap = Map<String, dynamic>.from(s);
-      if (groups.isNotEmpty) {
-        final lastGroup = groups.last;
-        final lastItem = lastGroup.last;
-        if (lastItem['kelas_id'] == sMap['kelas_id'] &&
-            lastItem['mata_pelajaran_id'] == sMap['mata_pelajaran_id']) {
-          lastGroup.add(sMap);
-          continue;
-        }
-      }
-      groups.add([sMap]);
-    }
-
-    for (var group in groups) {
-      dynamic journal;
-      for (var s in group) {
-        if ((s['jurnal_harian'] as List).isNotEmpty) {
-          journal = s['jurnal_harian'];
+      Map<String, dynamic>? matchingJournal;
+      for (var j in journalRes) {
+        if (j['jadwal_id'] == s['id'] || (j['jadwal_ids'] as List?)?.contains(s['id']) == true) {
+          matchingJournal = j;
           break;
         }
       }
-      if (journal != null) {
-        for (var s in group) {
-          s['jurnal_harian'] = journal;
-        }
-      }
+      s['jurnal_harian'] = matchingJournal != null ? [matchingJournal] : [];
     }
 
-    schedules.value = groups.expand((g) => g).toList();
-    journals.value = results[1];
+    // Sort schedules by the earliest jam_ke
+    scheduleRes.sort((a, b) {
+      final aJams = a['master_jam'] as List? ?? [];
+      final bJams = b['master_jam'] as List? ?? [];
+      if (aJams.isEmpty) return 1;
+      if (bJams.isEmpty) return -1;
+      final aFirst = aJams[0]['jam_ke'] as int? ?? 0;
+      final bFirst = bJams[0]['jam_ke'] as int? ?? 0;
+      return aFirst.compareTo(bFirst);
+    });
+
+    schedules.value = scheduleRes;
+    journals.value = journalRes;
   }
 
   Future<void> fetchDataByDate(DateTime date) async {
@@ -433,7 +421,6 @@ class DetailGuruPage extends StatelessWidget {
     Map<String, dynamic> s,
     DetailGuruController controller,
   ) {
-    final jam = s['master_jam'] ?? {};
     final kelas = s['master_kelas'] != null
         ? s['master_kelas']['nama_kelas']
         : '-';
@@ -445,7 +432,14 @@ class DetailGuruPage extends StatelessWidget {
     final journalData = hasJournal ? journals[0] : null;
     final journalStatus = journalData != null ? journalData['status'] : null;
 
-    String timeRange = jam['waktu_reguler'] ?? '-';
+    final jams = List<Map<String, dynamic>>.from(
+      s['master_jam'] is List ? s['master_jam'] : [s['master_jam']],
+    );
+    jams.sort((a, b) => (a['jam_ke'] as int).compareTo(b['jam_ke'] as int));
+    String startTime = jams.first['waktu_reguler']?.split('-')[0].trim() ?? '';
+    String endTime = jams.last['waktu_reguler']?.split('-')[1].trim() ?? '';
+    String timeRange = '$startTime - $endTime';
+    String jamKeLabel = jams.map((j) => j['jam_ke'].toString()).join(', ');
 
     Color bgColor = MainColor.secondaryColor;
     Color textColor = Colors.white;
@@ -489,7 +483,7 @@ class DetailGuruPage extends StatelessWidget {
           }
         },
         title: Text(
-          '$timeRange   $kelas',
+          '$timeRange   $kelas (Jam $jamKeLabel)',
           style: TextStyle(color: textColor, fontWeight: FontWeight.bold),
         ),
         subtitle: Text(
